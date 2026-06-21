@@ -1,6 +1,6 @@
 #!/bin/bash
 # ═════════════════════════════════════════════════
-# MelodyMiner (拾音) 配置引导脚本 mm_setup.sh
+# melodyminer (拾音) 配置引导脚本 mm_setup.sh
 # ═════════════════════════════════════════════════
 
 set -e
@@ -9,18 +9,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/mm_config.sh"
 
 echo "=================================================="
-echo " 🎵 MelodyMiner (拾音) 配置引导"
+echo " 🎵 melodyminer 配置引导 / Setup"
 echo "=================================================="
 echo ""
 echo "请选择语言 / Please select language:"
 echo " [1] 中文 (默认)"
-echo " [2] English"
+echo " [2] English (main script interface coming in V2.8.0)"
 echo -n "选择 / Select [1/2]: "
 read -r LANG_CHOICE
 [ -z "$LANG_CHOICE" ] && LANG_CHOICE="1"
 
 if [ "$LANG_CHOICE" == "2" ]; then
-    LANG="en"
+    MM_LANG="en"
+    MSG_WELCOME="🎵 melodyminer Setup"
     MSG_CHECK_DEP="🔍 Checking dependencies..."
     MSG_YTDLP_FOUND="  ✅ yt-dlp:"
     MSG_FFMPEG_FOUND="  ✅ ffmpeg:"
@@ -39,14 +40,19 @@ if [ "$LANG_CHOICE" == "2" ]; then
     MSG_DIR_CREATED="  ✅ Created:"
     MSG_MUSIC_DIR="  ✅ Music directory:"
     MSG_DEFAULT_ARTIST="── 🎤 Default Artist Folder ──"
-    MSG_INPUT_ARTIST_PROMPT="  Enter (Enter to use 'MelodyMiner'): "
+    MSG_INPUT_ARTIST_PROMPT="  Enter (Enter to use 'melodyminer'): "
     MSG_DEFAULT_ARTIST_SET="  ✅ Default artist folder:"
     MSG_AUDIO_FORMAT="── 🎵 Audio Format ──"
     MSG_USING_OPUS="  ✅ Using opus (m4a support coming soon)"
     MSG_GEN_CONFIG="── 📝 Generating Config File ──"
     MSG_CONFIG_SAVED="  ✅ Config file saved:"
     MSG_DONE="🎉 Setup complete!"
-    MSG_RUN_CMD="  bash MelodyMiner.sh"
+    MSG_USAGE="Usage:"
+    MSG_RUN_CMD="  bash melodyminer.sh"
+    MSG_MODIFY_CONFIG="Modify config:"
+    MSG_EDIT_CMD="  Edit $CONFIG_FILE"
+    MSG_RECONFIGURE="Reconfigure:"
+    MSG_RERUN_CMD="  bash mm_setup.sh"
     MSG_HIDDEN_FOLDERS="── 🗂️ Hidden Folders ──"
     MSG_SELECT_HIDE="  Select folders to hide (e.g., attachments):"
     MSG_INPUT_HIDE="  Enter folder numbers to hide (comma separated, Enter to skip): "
@@ -54,8 +60,11 @@ if [ "$LANG_CHOICE" == "2" ]; then
     MSG_SELECT_DEFAULT="  Select default artist folder:"
     MSG_NEW_FOLDER="  [0] Create new folder"
     MSG_INPUT_NEW="  Enter new folder name: "
+    MSG_DEFAULT_MARK=" (default)"
+    MSG_SELECT_PROMPT="Select number or enter name (Enter for default[1]): "
 else
-    LANG="zh"
+    MM_LANG="zh"
+    MSG_WELCOME="🎵 melodyminer (拾音) 配置引导"
     MSG_CHECK_DEP="🔍 检查依赖环境..."
     MSG_YTDLP_FOUND="  ✅ yt-dlp:"
     MSG_FFMPEG_FOUND="  ✅ ffmpeg:"
@@ -74,14 +83,19 @@ else
     MSG_DIR_CREATED="  ✅ 已创建:"
     MSG_MUSIC_DIR="  ✅ 音乐目录:"
     MSG_DEFAULT_ARTIST="── 🎤 默认歌手文件夹 ──"
-    MSG_INPUT_ARTIST_PROMPT="  请输入 (回车使用 'MelodyMiner'): "
+    MSG_INPUT_ARTIST_PROMPT="  请输入 (回车使用 'melodyminer'): "
     MSG_DEFAULT_ARTIST_SET="  ✅ 默认歌手文件夹:"
     MSG_AUDIO_FORMAT="── 🎵 音频格式 ──"
     MSG_USING_OPUS="  ✅ 当前使用: opus（m4a 支持将在后续版本添加）"
     MSG_GEN_CONFIG="── 📝 生成配置文件 ──"
     MSG_CONFIG_SAVED="  ✅ 配置文件已保存:"
     MSG_DONE="🎉 配置完成！"
-    MSG_RUN_CMD="  bash MelodyMiner.sh"
+    MSG_USAGE="使用方法："
+    MSG_RUN_CMD="  bash melodyminer.sh"
+    MSG_MODIFY_CONFIG="修改配置："
+    MSG_EDIT_CMD="  编辑 $CONFIG_FILE"
+    MSG_RECONFIGURE="重新配置："
+    MSG_RERUN_CMD="  bash mm_setup.sh"
     MSG_HIDDEN_FOLDERS="── 🗂️ 隐藏文件夹管理 ──"
     MSG_SELECT_HIDE="  选择需要隐藏的文件夹（如 attachments）："
     MSG_INPUT_HIDE="  请输入要隐藏的文件夹编号（逗号分隔，回车跳过）: "
@@ -89,6 +103,8 @@ else
     MSG_SELECT_DEFAULT="  选择默认歌手文件夹:"
     MSG_NEW_FOLDER="  [0] 新建文件夹"
     MSG_INPUT_NEW="  请输入新文件夹名称: "
+    MSG_DEFAULT_MARK=" （默认）"
+    MSG_SELECT_PROMPT="请选择编号或直接输入名称 (直接回车默认[1]): "
 fi
 
 echo "=================================================="
@@ -172,33 +188,33 @@ echo "$MSG_DEFAULT_ARTIST"
 echo ""
 
 folders=()
+folders+=("melodyminer")
 while IFS= read -r line; do
+    [[ "$line" == "melodyminer" ]] && continue
     folders+=("$line")
 done < <(ls -F "$BASE_DIR" 2>/dev/null | grep '/$' | sed 's/\///')
 
-if [ ${#folders[@]} -gt 0 ]; then
-    echo "$MSG_SELECT_DEFAULT"
-    for i in "${!folders[@]}"; do
-        echo "[$((i+1))] ${folders[$i]}" >&2
-    done
-    echo "$MSG_NEW_FOLDER" >&2
-    echo -n "请选择编号或直接输入名称 (回车默认[1]): " >&2
-    read -r CHOICE
-    if [ -z "$CHOICE" ]; then
-        DEFAULT_ARTIST_DIR="${folders[0]}"
-    elif [[ "$CHOICE" =~ ^[0-9]+$ ]] && [ "$CHOICE" -gt 0 ] && [ "$CHOICE" -le "${#folders[@]}" ]; then
-        DEFAULT_ARTIST_DIR="${folders[$((CHOICE-1))]}"
-    elif [ "$CHOICE" == "0" ]; then
-        echo -n "$MSG_INPUT_NEW" >&2
-        read -r NEW_DIR
-        DEFAULT_ARTIST_DIR="$NEW_DIR"
+echo "$MSG_SELECT_DEFAULT"
+for i in "${!folders[@]}"; do
+    if [ "$i" -eq 0 ]; then
+        echo "[$((i+1))] ${folders[$i]}$MSG_DEFAULT_MARK" >&2
     else
-        DEFAULT_ARTIST_DIR="$CHOICE"
+        echo "[$((i+1))] ${folders[$i]}" >&2
     fi
+done
+echo "$MSG_NEW_FOLDER" >&2
+echo -n "$MSG_SELECT_PROMPT" >&2
+read -r CHOICE
+if [ -z "$CHOICE" ]; then
+    DEFAULT_ARTIST_DIR="${folders[0]}"
+elif [[ "$CHOICE" =~ ^[0-9]+$ ]] && [ "$CHOICE" -gt 0 ] && [ "$CHOICE" -le "${#folders[@]}" ]; then
+    DEFAULT_ARTIST_DIR="${folders[$((CHOICE-1))]}"
+elif [ "$CHOICE" == "0" ]; then
+    echo -n "$MSG_INPUT_NEW" >&2
+    read -r NEW_DIR
+    DEFAULT_ARTIST_DIR="$NEW_DIR"
 else
-    echo -n "$MSG_INPUT_ARTIST_PROMPT"
-    read -r USER_DEFAULT_ARTIST
-    DEFAULT_ARTIST_DIR="${USER_DEFAULT_ARTIST:-MelodyMiner}"
+    DEFAULT_ARTIST_DIR="$CHOICE"
 fi
 echo "$MSG_DEFAULT_ARTIST_SET $DEFAULT_ARTIST_DIR"
 echo ""
@@ -237,7 +253,7 @@ if [ ${#all_dirs[@]} -gt 0 ]; then
     fi
 fi
 
-HIDDEN_DIRS=($(printf "%s\n" "${HIDDEN_DIRS[@]}" | sort -u))
+mapfile -t HIDDEN_DIRS < <(printf "%s\n" "${HIDDEN_DIRS[@]}" | sort -u)
 echo "$MSG_HIDE_ADDED ${HIDDEN_DIRS[*]}"
 echo ""
 
@@ -251,11 +267,11 @@ HIDDEN_DIRS_STR+=")"
 
 cat > "$CONFIG_FILE" << CFGEOF
 #!/bin/bash
-# MelodyMiner (拾音) 配置文件
+# melodyminer (拾音) 配置文件
 # 由 mm_setup.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')
 
-# 语言设置 (zh/en) - 暂未启用
-LANG="$LANG"
+# 语言设置 (zh/en)
+MM_LANG="$MM_LANG"
 
 # 音乐库根目录
 BASE_DIR="$BASE_DIR"
@@ -278,9 +294,6 @@ AUDIO_FORMAT="$AUDIO_FORMAT"
 # 播放列表下载间隔（秒，0=不限制）
 PLAYLIST_SLEEP_REQUESTS=0
 PLAYLIST_SLEEP_INTERVAL=0
-
-# Cookies 路径（可选，用于需要登录的链接或 Premium 高质量）
-# COOKIES_PATH="$SCRIPT_DIR/cookies.txt"
 CFGEOF
 
 chmod +x "$CONFIG_FILE"
@@ -291,6 +304,12 @@ echo "=================================================="
 echo " $MSG_DONE"
 echo "=================================================="
 echo ""
-echo "使用方法："
+echo "$MSG_USAGE"
 echo "$MSG_RUN_CMD"
+echo ""
+echo "$MSG_MODIFY_CONFIG"
+echo "$MSG_EDIT_CMD"
+echo ""
+echo "$MSG_RECONFIGURE"
+echo "$MSG_RERUN_CMD"
 echo ""
