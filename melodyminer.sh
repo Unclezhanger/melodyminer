@@ -1,7 +1,12 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# melodyminer (拾音) V2.7.8
-# 修复: cleanup_worker 清理范围、|分隔符转义、xargs报错
+# melodyminer (拾音) V2.8.5
+# 修复: MV策略1中带"-"的VID导致grep报错(while read + grep -F --)
+# 修复: input_mv_full的read重定向到/dev/tty防止被here-string吞掉
+# 优化: 移除无意义的MV数量提示
+# 优化: 文件夹3列、曲目2列显示(修复对齐)
+# 增强: MV策略1后处理兜底检测meta,有meta裁剪封面+真实album
+# 保留: 播放列表类型选择、后台英文化、V2.8.3策略2后处理修正
 # ─────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +23,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 source "$CONFIG_FILE"
 
+: "${MM_LANG:=zh}"
 : "${BASE_DIR:=$HOME/navidrome/music}"
 : "${YTDLP:=yt-dlp}"
 : "${DEFAULT_ARTIST_DIR:=melodyminer}"
@@ -45,10 +51,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
+is_en() { [ "$MM_LANG" = "en" ]; }
+
+tr_text() {
+    local zh="$1" en="$2"
+    if is_en; then printf "%s" "$en"; else printf "%s" "$zh"; fi
+}
+
+say() {
+    local zh="$1" en="$2"
+    tr_text "$zh" "$en"
+    printf "\n"
+}
+
+ask() {
+    local zh="$1" en="$2"
+    tr_text "$zh" "$en"
+}
+
 echo "=================================================="
-echo " 🎵 melodyminer (拾音) V2.7.8"
+echo " 🎵 melodyminer (拾音) V2.8.5"
 echo "=================================================="
-echo "支持: 专辑 / 播放列表 / YTM电台 / 单曲"
+say "支持: 专辑 / 播放列表 / YTM电台 / 单曲" "Supports: albums / playlists / YTM radios / singles"
 echo "=================================================="
 
 MAX_LINKS_PER_RUN=10
@@ -88,7 +112,11 @@ parse_track_selection() {
 select_artist_folder() {
     local prompt_suffix="$1"
     echo "" >&2
-    echo "--- 📂 请选择歌手文件夹 ${prompt_suffix}---" >&2
+    if is_en; then
+        echo "--- 📂 Select artist folder ${prompt_suffix}---" >&2
+    else
+        echo "--- 📂 请选择歌手文件夹 ${prompt_suffix}---" >&2
+    fi
     local folders=()
     folders+=("$DEFAULT_ARTIST_DIR")
     while IFS= read -r line; do
@@ -99,35 +127,58 @@ select_artist_folder() {
         folders+=("$line")
     done < <(ls -F "$BASE_DIR" 2>/dev/null | grep '/$' | sed 's/\///')
 
+    # 3列格式化输出
     for i in "${!folders[@]}"; do
-        if [ "$i" -eq 0 ]; then echo "[$((i+1))] ${folders[$i]} （默认）" >&2
-        else echo "[$((i+1))] ${folders[$i]}" >&2; fi
+        if [ "$i" -eq 0 ]; then
+            if is_en; then
+                printf "[%2d] %-22s (default)  " "$((i+1))" "${folders[$i]}" >&2
+            else
+                printf "[%2d] %-22s （默认）  " "$((i+1))" "${folders[$i]}" >&2
+            fi
+        else
+            printf "[%2d] %-25s  " "$((i+1))" "${folders[$i]}" >&2
+        fi
+        if [ $(((i+1) % 3)) -eq 0 ]; then echo "" >&2; fi
     done
-    echo "[0] 新建歌手文件夹" >&2
+    [ $((${#folders[@]} % 3)) -ne 0 ] && echo "" >&2
+    echo "──────────" >&2
+    if is_en; then echo "[0] Create new artist folder" >&2
+    else echo "[0] 新建歌手文件夹" >&2; fi
     echo "--------------------" >&2
-    echo -n "请选择编号或直接输入名称 (直接回车默认[1]): " >&2
+    if is_en; then echo -n "Select number or enter a name (Enter for default[1]): " >&2
+    else echo -n "请选择编号或直接输入名称 (直接回车默认[1]): " >&2; fi
     read -r CHOICE
     if [ -z "$CHOICE" ]; then echo "${folders[0]}"
     elif [[ "$CHOICE" =~ ^[0-9]+$ ]] && [ "$CHOICE" -gt 0 ] && [ "$CHOICE" -le "${#folders[@]}" ]; then echo "${folders[$((CHOICE-1))]}"
     elif [ "$CHOICE" == "0" ]; then
-        echo -n "请输入新歌手文件夹名称: " >&2; read -r NEW_DIR; echo "$NEW_DIR"
+        if is_en; then echo -n "Enter new artist folder name: " >&2
+        else echo -n "请输入新歌手文件夹名称: " >&2; fi
+        read -r NEW_DIR; echo "$NEW_DIR"
     else echo "$CHOICE"; fi
 }
 
 input_album_artist() {
     local default_name="$1"
     echo "" >&2
-    echo "请输入专辑艺术家：" >&2
-    echo " [回车] 使用默认值「$default_name」" >&2
-    echo " [n] 跳过（不写入 album_artist）" >&2
-    echo " [其他] 自定义输入" >&2
-    echo -n "请选择: " >&2
+    if is_en; then
+        echo "Enter album artist:" >&2
+        echo " [Enter] Use default \"$default_name\"" >&2
+        echo " [n] Skip (do not write album_artist)" >&2
+        echo " [other] Custom input" >&2
+        echo -n "Choose: " >&2
+    else
+        echo "请输入专辑艺术家：" >&2
+        echo " [回车] 使用默认值「$default_name」" >&2
+        echo " [n] 跳过（不写入 album_artist）" >&2
+        echo " [其他] 自定义输入" >&2
+        echo -n "请选择: " >&2
+    fi
     read -r input
-    if [ -z "$input" ]; then echo "$default_name"; echo "✅ Album Artist: $default_name (默认)" >&2
-    elif [[ "$input" =~ ^[Nn]$ ]]; then echo "SKIP"; echo "⏭️ 跳过 Album Artist" >&2
+    if [ -z "$input" ]; then echo "$default_name"; if is_en; then echo "✅ Album Artist: $default_name (default)" >&2; else echo "✅ Album Artist: $default_name (默认)" >&2; fi
+    elif [[ "$input" =~ ^[Nn]$ ]]; then echo "SKIP"; if is_en; then echo "⏭️ Skipped Album Artist" >&2; else echo "⏭️ 跳过 Album Artist" >&2; fi
     else
         local safe_input=$(echo "$input" | sed 's/|/｜/g')
-        echo "$safe_input"; echo "✅ Album Artist: $safe_input (自定义)" >&2
+        echo "$safe_input"; if is_en; then echo "✅ Album Artist: $safe_input (custom)" >&2; else echo "✅ Album Artist: $safe_input (自定义)" >&2; fi
     fi
 }
 
@@ -159,14 +210,22 @@ extract_song_info() {
 input_mv_full() {
     local default_title="$1" default_artist="$2"
     echo "" >&2
-    echo "--- 🎤 输入歌曲信息 ---" >&2
-    echo " [回车]=使用默认值" >&2
-    echo -n "歌名 [${default_title}]: " >&2
-    read -r t; [ -z "$t" ] && t="$default_title"
-    echo -n "歌手 [${default_artist}]: " >&2
-    read -r a; [ -z "$a" ] && a="$default_artist"
-    echo -n "专辑 [${t}]: " >&2
-    read -r al; [ -z "$al" ] && al="$t"
+    if is_en; then
+        echo "--- 🎤 Enter track info ---" >&2
+        echo " [Enter]=use default" >&2
+        echo -n "Title [${default_title}]: " >&2
+    else
+        echo "--- 🎤 输入歌曲信息 ---" >&2
+        echo " [回车]=使用默认值" >&2
+        echo -n "歌名 [${default_title}]: " >&2
+    fi
+    read -r t < /dev/tty; [ -z "$t" ] && t="$default_title"
+    if is_en; then echo -n "Artist [${default_artist}]: " >&2
+    else echo -n "歌手 [${default_artist}]: " >&2; fi
+    read -r a < /dev/tty; [ -z "$a" ] && a="$default_artist"
+    if is_en; then echo -n "Album [${t}]: " >&2
+    else echo -n "专辑 [${t}]: " >&2; fi
+    read -r al < /dev/tty; [ -z "$al" ] && al="$t"
     t=$(echo "$t" | sed 's/|/｜/g')
     a=$(echo "$a" | sed 's/|/｜/g')
     al=$(echo "$al" | sed 's/|/｜/g')
@@ -181,9 +240,9 @@ get_album_info() {
         echo "Unknown Album"; echo "0"; echo "Unknown Artist"
         rm -f "$tmp_json"; return
     fi
-    python3 << PYEOF
-import json, re
-with open("$tmp_json") as f: d = json.load(f)
+    python3 - "$tmp_json" << 'PYEOF'
+import json, re, sys
+with open(sys.argv[1]) as f: d = json.load(f)
 raw = d.get('title', '') or ''
 album = re.sub(r'^.+? - ', '', raw).strip() or 'Unknown Album'
 count = d.get('playlist_count', 0)
@@ -206,9 +265,9 @@ get_playlist_info() {
         echo "Unknown Playlist"; echo "0"
         rm -f "$tmp_json"; return
     fi
-    python3 << PYEOF
-import json
-with open("$tmp_json") as f: d = json.load(f)
+    python3 - "$tmp_json" << 'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
 playlist = d.get('title', '').strip() or 'Unknown Playlist'
 count = d.get('playlist_count', 0)
 print(playlist); print(count)
@@ -232,9 +291,9 @@ get_single_info() {
         echo "Unknown"; echo "1"; echo ""; echo ""; echo "False"
         rm -f "$tmp_json" "$json_file" 2>/dev/null; return
     fi
-    python3 << PYEOF
-import json
-with open("$json_file") as f: d = json.load(f)
+    python3 - "$json_file" << 'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f: d = json.load(f)
 album = d.get('album', '') or ''
 title = d.get('title', 'Unknown')
 artist = d.get('artist', '') or ''
@@ -259,37 +318,40 @@ get_link_type() {
 # 主流程
 # ═════════════════════════════════════════════
 echo ""
-echo "请粘贴链接（一行一条），空行或输入 end 开始："
+say "请粘贴链接（一行一条），空行或输入 end 开始：" "Paste links, one per line. Submit an empty line or type end to start:"
 URLS=()
 while true; do
     read -r line
     [[ "$line" == "end" ]] && break
     [[ -z "$line" ]] && break
     URLS+=("$line")
-    [ ${#URLS[@]} -ge $MAX_LINKS_PER_RUN ] && { echo "⚠️ 已达上限"; break; }
+    [ ${#URLS[@]} -ge $MAX_LINKS_PER_RUN ] && { say "⚠️ 已达上限" "⚠️ Link limit reached"; break; }
 done
-[ ${#URLS[@]} -eq 0 ] && { echo "❌ 未检测到链接"; exit 1; }
+[ ${#URLS[@]} -eq 0 ] && { say "❌ 未检测到链接" "❌ No links detected"; exit 1; }
 
 echo ""
-echo "🔍 检测链接类型..."
+say "🔍 检测链接类型..." "🔍 Detecting link types..."
 VALID_URLS=(); URL_TYPES=(); URL_NAMES=()
 for url in "${URLS[@]}"; do
     TYPE=$(get_link_type "$url")
     if [ "$TYPE" != "unknown" ]; then
         VALID_URLS+=("$url"); URL_TYPES+=("$TYPE")
         case "$TYPE" in
-            album) N="专辑";; playlist) N="播放列表";; ytm_radio) N="YTM电台";; single) N="单曲";;
+            album) if is_en; then N="Album"; else N="专辑"; fi;;
+            playlist) if is_en; then N="Playlist"; else N="播放列表"; fi;;
+            ytm_radio) if is_en; then N="YTM Radio"; else N="YTM电台"; fi;;
+            single) if is_en; then N="Single"; else N="单曲"; fi;;
         esac
         URL_NAMES+=("$N")
         echo "✅ $N: $url"
     else
-        echo "⚠️ 跳过无效: $url"
+        if is_en; then echo "⚠️ Skipping invalid link: $url"; else echo "⚠️ 跳过无效: $url"; fi
     fi
 done
-[ ${#VALID_URLS[@]} -eq 0 ] && { echo "❌ 没有有效链接"; exit 1; }
+[ ${#VALID_URLS[@]} -eq 0 ] && { say "❌ 没有有效链接" "❌ No valid links"; exit 1; }
 
 echo ""
-echo "📊 有效链接: ${#VALID_URLS[@]} 个"
+if is_en; then echo "📊 Valid links: ${#VALID_URLS[@]}"; else echo "📊 有效链接: ${#VALID_URLS[@]} 个"; fi
 
 declare -a ALBUM_CONFIGS
 TOTAL_SELECTED=0
@@ -298,7 +360,7 @@ for idx in "${!VALID_URLS[@]}"; do
     url="${VALID_URLS[$idx]}"; TYPE="${URL_TYPES[$idx]}"
     echo ""
     echo "=========================================="
-    echo "🔍 获取信息: ${URL_NAMES[$idx]}"
+    if is_en; then echo "🔍 Fetching info: ${URL_NAMES[$idx]}"; else echo "🔍 获取信息: ${URL_NAMES[$idx]}"; fi
     echo "=========================================="
 
     IS_SINGLE=false; IS_PLAYLIST=false; IS_ALBUM=false; IS_YTM_RADIO=false
@@ -332,70 +394,113 @@ for idx in "${!VALID_URLS[@]}"; do
         SONG_LIST="1. $SINGLE_TITLE"; TRACK_COUNT=1
     fi
 
-    [ -z "$DISPLAY_NAME" ] && { echo "⚠️ 无法获取信息，跳过"; continue; }
+    [ -z "$DISPLAY_NAME" ] && { say "⚠️ 无法获取信息，跳过" "⚠️ Could not fetch info, skipping"; continue; }
     SAFE_NAME=$(sanitize_filename "$DISPLAY_NAME")
     echo ""
-    echo "📀 项目: $SAFE_NAME"
-    [ -n "$DISPLAY_ARTIST" ] && [ "$DISPLAY_ARTIST" != "Unknown Artist" ] && echo "🎤 歌手: $DISPLAY_ARTIST"
-    echo "🎵 曲目数: $TRACK_COUNT"
-    [ "$IS_ALBUM" == true ] && echo "📌 类型: 正规专辑"
-    [ "$IS_YTM_RADIO" == true ] && echo "📌 类型: YTM 电台/合集"
-    [ "$IS_PLAYLIST" == true ] && echo "📌 类型: YouTube 播放列表"
-    [ "$IS_SINGLE" == true ] && { [ "$HAS_METADATA" == "True" ] && echo "🔧 类型: 纯音频单曲" || echo "🎬 类型: MV 单曲"; }
+    if is_en; then echo "📀 Item: $SAFE_NAME"; else echo "📀 项目: $SAFE_NAME"; fi
+    [ -n "$DISPLAY_ARTIST" ] && [ "$DISPLAY_ARTIST" != "Unknown Artist" ] && { if is_en; then echo "🎤 Artist: $DISPLAY_ARTIST"; else echo "🎤 歌手: $DISPLAY_ARTIST"; fi; }
+    if is_en; then echo "🎵 Tracks: $TRACK_COUNT"; else echo "🎵 曲目数: $TRACK_COUNT"; fi
+    [ "$IS_ALBUM" == true ] && { if is_en; then echo "📌 Type: YTM album"; else echo "📌 类型: 正规专辑"; fi; }
+    [ "$IS_YTM_RADIO" == true ] && { if is_en; then echo "📌 Type: YTM radio/mix"; else echo "📌 类型: YTM 电台/合集"; fi; }
+    [ "$IS_PLAYLIST" == true ] && { if is_en; then echo "📌 Type: YouTube playlist"; else echo "📌 类型: YouTube 播放列表"; fi; }
+    [ "$IS_SINGLE" == true ] && { if [ "$HAS_METADATA" == "True" ]; then if is_en; then echo "🔧 Type: audio single"; else echo "🔧 类型: 纯音频单曲"; fi; else if is_en; then echo "🎬 Type: MV single"; else echo "🎬 类型: MV 单曲"; fi; fi; }
+
+    # ── 普通播放列表：用户自选类型 ──
+    if [ "$IS_PLAYLIST" == true ]; then
+        echo ""
+        if is_en; then
+            echo "─── 🎬 Playlist Type ───"
+            echo "[1] YouTube video playlist (MV mode)"
+            echo "[2] YouTube Music user playlist (YTM radio mode)"
+        else
+            echo "─── 🎬 播放列表类型 ───"
+            echo "[1] YouTube 视频播放列表（MV 模式）"
+            echo "[2] YouTube Music 用户自建播放列表（YTM 电台模式）"
+        fi
+        ask "选择 [1/2]: " "Choose [1/2]: "; read -r PL_TYPE
+        [ -z "$PL_TYPE" ] && PL_TYPE="1"
+        if [ "$PL_TYPE" == "2" ]; then
+            IS_PLAYLIST=false
+            IS_YTM_RADIO=true
+            TYPE="ytm_radio"
+            if is_en; then
+                echo "📌 Switched to: YTM radio/mix mode"
+            else
+                echo "📌 已切换为: YTM 电台/合集模式"
+            fi
+        else
+            if is_en; then
+                echo "📌 Using: MV mode"
+            else
+                echo "📌 使用: MV 模式"
+            fi
+        fi
+    fi
 
     ARTIST_DIR=$(select_artist_folder " (《$SAFE_NAME》)")
     ARTIST_PATH="$BASE_DIR/$ARTIST_DIR"; mkdir -p "$ARTIST_PATH"
 
     if [ "$IS_SINGLE" == true ]; then
-        echo -n "创建子文件夹？[回车=是/n=否]: "; read -r SUB_CHOICE
+        ask "创建子文件夹？[回车=是/n=否]: " "Create a subfolder? [Enter=yes/n=no]: "; read -r SUB_CHOICE
         [[ "$SUB_CHOICE" =~ ^[Nn]$ ]] && FINAL_PATH="$ARTIST_PATH" || { FINAL_PATH="$ARTIST_PATH/$SAFE_NAME"; mkdir -p "$FINAL_PATH"; }
     else
         FINAL_PATH="$ARTIST_PATH/$SAFE_NAME"; mkdir -p "$FINAL_PATH"
     fi
-    echo "✅ 路径: $FINAL_PATH"
+    if is_en; then echo "✅ Path: $FINAL_PATH"; else echo "✅ 路径: $FINAL_PATH"; fi
 
     ALBUM_ARTIST=""; ENHANCED_MODE=false
     if [ "$IS_ALBUM" == true ]; then
         AA_RESULT=$(input_album_artist "$ARTIST_DIR")
         [ "$AA_RESULT" != "SKIP" ] && ALBUM_ARTIST="$AA_RESULT"
         echo ""
-        echo "[1] 统一封面 [2] 独立封面"
-        echo -n "选择 [1/2]: "; read -r MC
+        if is_en; then echo "[1] Unified cover [2] Per-track covers"; else echo "[1] 统一封面 [2] 独立封面"; fi
+        ask "选择 [1/2]: " "Choose [1/2]: "; read -r MC
         [ "$MC" == "2" ] && ENHANCED_MODE=true
     elif [ "$IS_SINGLE" == true ]; then
         ENHANCED_MODE=true
     else
         ENHANCED_MODE=true
-        [ "$IS_YTM_RADIO" == true ] && echo "📌 YTM电台：自动使用独立封面模式"
+        [ "$IS_YTM_RADIO" == true ] && say "📌 YTM电台：自动使用独立封面模式" "📌 YTM radio: using per-track cover mode automatically"
     fi
 
     if [ "$TRACK_COUNT" -eq 1 ]; then
         SELECTION="ALL"; SELECTED_COUNT=1
     else
         echo ""
-        echo "$SONG_LIST"; echo ""
+        # 2列显示曲目列表
+        echo "$SONG_LIST" | awk '{
+            if (NR % 2 == 1) printf "%-55s", $0;
+            else print $0
+        } END { if (NR % 2 == 1) print "" }'
+        echo ""
         if [ "$TRACK_COUNT" -gt 50 ]; then
-            echo "💡 共 $TRACK_COUNT 首，建议分批下载（如 1-50, 51-100）"
+            if is_en; then echo "💡 $TRACK_COUNT tracks total. Consider downloading in batches, e.g. 1-50, 51-100."
+            else echo "💡 共 $TRACK_COUNT 首，建议分批下载（如 1-50, 51-100）"; fi
         fi
         while true; do
-            echo -n "曲目编号 [回车=全部，支持 1,3,5 或 1-5]: "; read -r TI
+            ask "曲目编号 [回车=全部，支持 1,3,5 或 1-5]: " "Track numbers [Enter=all, supports 1,3,5 or 1-5]: "; read -r TI
             if [ -z "$TI" ]; then SELECTION="ALL"; SELECTED_COUNT=$TRACK_COUNT; break; fi
             P=$(parse_track_selection "$TI" "$TRACK_COUNT")
-            [[ "$P" == INVALID:* ]] && { echo "⚠️ 错误"; continue; }
+            [[ "$P" == INVALID:* ]] && { say "⚠️ 错误" "⚠️ Invalid selection"; continue; }
             SELECTION="$P"; SELECTED_COUNT=$(echo "$SELECTION" | tr ',' '\n' | wc -l); break
         done
     fi
-    echo "✅ 将下载 $SELECTED_COUNT 首"
+    if is_en; then echo "✅ Will download $SELECTED_COUNT track(s)"; else echo "✅ 将下载 $SELECTED_COUNT 首"; fi
 
     # ── MV 单曲处理 ──
     if [ "$IS_SINGLE" == true ] && [ "$HAS_METADATA" != "True" ]; then
         echo ""
-        echo "⚠️ MV 单曲"
+        say "⚠️ MV 单曲" "⚠️ MV single"
         SI=$(extract_song_info "$SINGLE_TITLE"); ST=$(echo "$SI" | cut -d'|' -f1); SA=$(echo "$SI" | cut -d'|' -f2)
         [ -z "$SA" ] && SA="$ARTIST_DIR"
-        echo "[1] 手动输入歌名/歌手/专辑（专辑默认=歌名）"
-        echo "[2] 使用默认值（歌手=uploader，歌名=title，专辑=title）"
-        echo -n "选择 [1/2]: "; read -r MS
+        if is_en; then
+            echo "[1] Manually enter title/artist/album (album defaults to title)"
+            echo "[2] Use defaults (artist=uploader, title=title, album=title)"
+        else
+            echo "[1] 手动输入歌名/歌手/专辑（专辑默认=歌名）"
+            echo "[2] 使用默认值（歌手=uploader，歌名=title，专辑=title）"
+        fi
+        ask "选择 [1/2]: " "Choose [1/2]: "; read -r MS
         [ -z "$MS" ] && MS="1"
         if [ "$MS" == "1" ]; then
             MV_STRATEGY="1"
@@ -409,12 +514,20 @@ for idx in "${!VALID_URLS[@]}"; do
         fi
     fi
 
-    # ── 播放列表 MV 处理 ──
-    if [ "$IS_PLAYLIST" == true ] && [ "$SELECTION" != "ALL" ]; then
-        SEL_ITEMS=$(echo "$SELECTION" | tr ',' ' ')
+    # ── 播放列表 MV 处理（仅 MV 模式）──
+    if [ "$IS_PLAYLIST" == true ]; then
+        if [ "$SELECTION" = "ALL" ]; then
+            SEL_ITEMS=""
+            for ((inum=1; inum<=TRACK_COUNT; inum++)); do
+                SEL_ITEMS="${SEL_ITEMS}${SEL_ITEMS:+ }$inum"
+            done
+        else
+            SEL_ITEMS=$(echo "$SELECTION" | tr ',' ' ')
+        fi
         NORMAL_LIST=""; MV_LIST=""
         for inum in $SEL_ITEMS; do
             L=$(echo "$SONG_LIST_FULL" | sed -n "${inum}p")
+            [ -z "$L" ] && continue
             VID=$(echo "$L" | awk -F'|' '{print $(NF-1)}')
             HAS=$(echo "$L" | awk -F'|' '{print $NF}')
             if [ "$HAS" != "True" ]; then
@@ -428,30 +541,38 @@ for idx in "${!VALID_URLS[@]}"; do
 
         if [ -n "$MV_LIST" ]; then
             echo ""
-            echo "⚠️ 选中有 MV ($(echo $MV_VIDS | wc -w) 首)"
-            echo "[1] 手动输入歌名/歌手/专辑（专辑默认=歌名）"
-            echo "[2] 使用默认值（歌手=uploader，歌名=title，专辑=title）"
-            echo -n "选择 [1/2]: "; read -r MS
+            if is_en; then
+                echo "[1] Manually enter title/artist/album (album defaults to title)"
+                echo "[2] Use defaults (artist=uploader, title=title, album=title)"
+            else
+                echo "[1] 手动输入歌名/歌手/专辑（专辑默认=歌名）"
+                echo "[2] 使用默认值（歌手=uploader，歌名=title，专辑=title）"
+            fi
+            ask "选择 [1/2]: " "Choose [1/2]: "; read -r MS
             [ -z "$MS" ] && MS="1"
             if [ "$MS" == "1" ]; then
                 MV_STRATEGY="1"
                 echo ""
-                echo "--- 🎬 逐首确认 ---"
+                if is_en; then echo "--- 🎬 Confirm each MV track ---"; else echo "--- 🎬 逐首确认 ---"; fi
                 MV_INFO=""
-                for VID in $MV_VIDS; do
-                    LINE=$(echo "$SONG_LIST_FULL" | grep "$VID")
+                while IFS= read -r VID; do
+                    [ -z "$VID" ] && continue
+                    LINE=$(echo "$SONG_LIST_FULL" | grep -F -- "$VID")
+                    [ -z "$LINE" ] && continue
                     INUM=$(echo "$LINE" | sed 's/^\([0-9]*\)\. .*/\1/')
                     RAW_TITLE=$(echo "$LINE" | sed 's/^[0-9]*\. //; s/|[^|]*|[^|]*$//')
                     SI=$(extract_song_info "$RAW_TITLE"); ST=$(echo "$SI" | cut -d'|' -f1); SA=$(echo "$SI" | cut -d'|' -f2)
                     [ -z "$SA" ] && SA="$ARTIST_DIR"
-                    echo "" >&2; echo "━━━━ 第 ${INUM} 首: ${RAW_TITLE:0:60}..." >&2
+                    echo "" >&2
+                    if is_en; then echo "━━━━ Track ${INUM}: ${RAW_TITLE:0:60}..." >&2
+                    else echo "━━━━ 第 ${INUM} 首: ${RAW_TITLE:0:60}..." >&2; fi
                     NAME_INPUT=$(input_mv_full "$ST" "$SA")
                     TITLE=$(echo "$NAME_INPUT" | cut -d'|' -f1)
                     ARTIST=$(echo "$NAME_INPUT" | cut -d'|' -f2)
                     ALBUM=$(echo "$NAME_INPUT" | cut -d'|' -f3)
                     [ -n "$MV_INFO" ] && MV_INFO="${MV_INFO};"
                     MV_INFO="${MV_INFO}${VID}=${TITLE}=${ARTIST}=${ALBUM}"
-                done
+                done <<< "$(echo "$MV_VIDS" | tr ' ' '\n' | grep -v '^$')"
             else
                 MV_STRATEGY="2"
                 NORMAL_SELECTION="$SELECTION"; MV_VIDS=""; MV_INFO=""
@@ -461,15 +582,16 @@ for idx in "${!VALID_URLS[@]}"; do
     fi
 
     NT=$((TOTAL_SELECTED + SELECTED_COUNT))
-    [ "$NT" -gt "$MAX_TRACKS_PER_RUN" ] && { echo "⚠️ 累计超限 $MAX_TRACKS_PER_RUN 首"; continue; }
+    [ "$NT" -gt "$MAX_TRACKS_PER_RUN" ] && { if is_en; then echo "⚠️ Total selection exceeds $MAX_TRACKS_PER_RUN tracks"; else echo "⚠️ 累计超限 $MAX_TRACKS_PER_RUN 首"; fi; continue; }
     TOTAL_SELECTED=$NT
 
     ALBUM_CONFIGS+=("$(safe_field "$SAFE_NAME")|$SELECTION|$url|$FINAL_PATH|$(safe_field "$ALBUM_ARTIST")|$ENHANCED_MODE|$TYPE|$HAS_METADATA|$(safe_field "$MV_TITLE")|$(safe_field "$MV_ARTIST")|$(safe_field "$MV_ALBUM")|$(safe_field "$MV_ALBUM_ARTIST")|$(safe_field "$BATCH_ALBUM")|||$NORMAL_SELECTION|$MV_VIDS|$(safe_field "$MV_INFO")|$MV_STRATEGY")
     echo ""
 done
 
-[ ${#ALBUM_CONFIGS[@]} -eq 0 ] && { echo "❌ 没有项目"; exit 1; }
-echo "📊 统计: ${#ALBUM_CONFIGS[@]} 个项目，累计 $TOTAL_SELECTED 首"
+[ ${#ALBUM_CONFIGS[@]} -eq 0 ] && { say "❌ 没有项目" "❌ No items to download"; exit 1; }
+if is_en; then echo "📊 Summary: ${#ALBUM_CONFIGS[@]} item(s), $TOTAL_SELECTED track(s) total"
+else echo "📊 统计: ${#ALBUM_CONFIGS[@]} 个项目，累计 $TOTAL_SELECTED 首"; fi
 
 # ═════════════════════════════════════════════
 # 后台脚本生成
@@ -532,9 +654,9 @@ if cover_file and os.path.exists(cover_file):
     with open(cover_file, 'rb') as img:
         pic = Picture(); pic.data = img.read(); pic.type = 3; pic.mime = 'image/jpeg'
         audio['metadata_block_picture'] = [base64.b64encode(pic.write()).decode('ascii')]
-    print(f' ✅ +封面: {os.path.basename(fpath)}')
+    print(f'  ✅ +Cover: {os.path.basename(fpath)}')
 else:
-    print(f' ✅ ID3: {os.path.basename(fpath)}')
+    print(f'  ✅ ID3: {os.path.basename(fpath)}')
 audio.save()
 PYEOF
 }
@@ -557,12 +679,12 @@ try:
         with open(cf,'rb') as img:
             pic=Picture(); pic.data=img.read(); pic.type=3; pic.mime='image/jpeg'
             audio['metadata_block_picture'] = [base64.b64encode(pic.write()).decode('ascii')]
-        print(f' ✅ +封面: {os.path.basename(fpath)}')
+        print(f'  ✅ +Cover: {os.path.basename(fpath)}')
     else:
-        print(f' ✅ 仅ID3: {os.path.basename(fpath)}')
+        print(f'  ✅ ID3: {os.path.basename(fpath)}')
     audio.save()
 except Exception as e:
-    print(f' ❌ 失败: {os.path.basename(fpath)} - {e}')
+    print(f'  ❌ Failed: {os.path.basename(fpath)} - {e}')
 PYEOF
 }
 
@@ -608,12 +730,24 @@ log "⚙️ PID: $$ | 🕒 $(date '+%Y-%m-%d %H:%M:%S')"
 WORKEREOF
 
 # 替换占位符
-sed -i "s|__YTDLP__|$YTDLP|g" "$WORKER_SH"
-sed -i "s|__NODE_ARGS__|$NODE_ARGS|g" "$WORKER_SH"
-sed -i "s|__LOG_FILE__|$LOG_FILE|g" "$WORKER_SH"
-sed -i "s|__AUDIO_FORMAT__|$AUDIO_FORMAT|g" "$WORKER_SH"
-sed -i "s|__SLEEP_REQUESTS__|$PLAYLIST_SLEEP_REQUESTS|g" "$WORKER_SH"
-sed -i "s|__SLEEP_INTERVAL__|$PLAYLIST_SLEEP_INTERVAL|g" "$WORKER_SH"
+replace_token() {
+    python3 - "$WORKER_SH" "$1" "$2" << 'PYEOF'
+import sys
+path, token, value = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, 'r', encoding='utf-8') as f:
+    data = f.read()
+data = data.replace(token, value)
+with open(path, 'w', encoding='utf-8') as f:
+    f.write(data)
+PYEOF
+}
+
+replace_token "__YTDLP__" "$YTDLP"
+replace_token "__NODE_ARGS__" "$NODE_ARGS"
+replace_token "__LOG_FILE__" "$LOG_FILE"
+replace_token "__AUDIO_FORMAT__" "$AUDIO_FORMAT"
+replace_token "__SLEEP_REQUESTS__" "$PLAYLIST_SLEEP_REQUESTS"
+replace_token "__SLEEP_INTERVAL__" "$PLAYLIST_SLEEP_INTERVAL"
 
 # 写入 ALBUMS 数组
 echo 'ALBUMS=(' >> "$WORKER_SH"
@@ -656,7 +790,7 @@ for album_entry in "${ALBUMS[@]}"; do
     { [ "$TYPE" = "playlist" ] || [ "$TYPE" = "ytm_radio" ]; } && [ "$SLEEP_INTERVAL" -gt 0 ] && SLEEP_ARGS="--sleep-requests $SLEEP_REQUESTS --sleep-interval $SLEEP_INTERVAL"
 
     if [ "$ENHANCED_MODE" != "true" ]; then
-        log "🖼️ 统一封面..."
+        log "🖼️ Unified cover..."
         CTD=$(mktemp -d)
         "$YTDLP" $NODE_ARGS --no-warnings --write-thumbnail --skip-download --convert-thumbnails jpg \
             --playlist-items 1 -o "$CTD/%(id)s" "$url" >> "$LOG_FILE" 2>&1
@@ -666,12 +800,12 @@ for album_entry in "${ALBUMS[@]}"; do
             cover_compress "$FINAL_PATH/cover.jpg" "$FINAL_PATH/cover_tmp.jpg" 2>/dev/null
             if [ -f "$FINAL_PATH/cover_tmp.jpg" ]; then
                 mv "$FINAL_PATH/cover_tmp.jpg" "$FINAL_PATH/cover.jpg"
-                log "✅ 统一封面（压缩完成）"
+                log "✅ Unified cover (compressed)"
             else
-                log "✅ 统一封面（压缩失败，保留原图）"
+                log "✅ Unified cover (compression failed, keeping original)"
             fi
         else
-            log "⚠️ 未能获取统一封面"
+            log "⚠️ Could not fetch unified cover"
         fi
         rm -rf "$CTD"
     fi
@@ -680,13 +814,13 @@ for album_entry in "${ALBUMS[@]}"; do
     parse_mv_info "$MV_INFO"
 
     if [ "$IS_MV_SINGLE" = true ]; then
-        log "🚚 MV单曲(temp)..."
+        log "🚚 MV single (temp)..."
         "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             --embed-metadata --no-embed-thumbnail --windows-filenames --write-info-json \
             -f ba -x --audio-format "$AUDIO_FORMAT" --audio-quality 0 \
             -o "temp_mv_%(id)s.%(ext)s" -P "$FINAL_PATH" "$url" >> "$LOG_FILE" 2>&1
     elif [ "$MV_STRATEGY" = "2" ]; then
-        log "🚚 默认值模式批量..."
+        log "🚚 Default mode batch..."
         "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             --embed-metadata --no-embed-thumbnail --windows-filenames --yes-playlist \
             --parse-metadata "%(playlist_index)s:%(track_number)s" --write-info-json $SLEEP_ARGS \
@@ -695,7 +829,7 @@ for album_entry in "${ALBUMS[@]}"; do
             -o "%(artist,uploader)s - %(title)s.%(ext)s" -P "$FINAL_PATH" "$url" >> "$LOG_FILE" 2>&1
     else
         if [ -n "$NORMAL_SELECTION" ]; then
-            log "🚚 正常曲目批量..."
+            log "🚚 Normal track batch..."
             "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
                 --embed-metadata --no-embed-thumbnail --windows-filenames --yes-playlist \
                 --parse-metadata "%(playlist_index)s:%(track_number)s" --write-info-json $SLEEP_ARGS \
@@ -704,17 +838,18 @@ for album_entry in "${ALBUMS[@]}"; do
                 -o "%(artist,uploader)s - %(title)s.%(ext)s" -P "$FINAL_PATH" "$url" >> "$LOG_FILE" 2>&1
         fi
         if [ -n "$MV_VIDS" ] && [ "$MV_STRATEGY" = "1" ]; then
-            for VID in $MV_VIDS; do
+            while IFS= read -r VID; do
+                [ -z "$VID" ] && continue
                 SINGLE_URL="https://www.youtube.com/watch?v=$VID"
-                log "🚚 MV逐首: $VID"
+                log "🚚 MV track: $VID"
                 "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
                     --embed-metadata --no-embed-thumbnail --windows-filenames --write-info-json \
                     -f ba -x --audio-format "$AUDIO_FORMAT" --audio-quality 0 \
                     -o "temp_mv_%(id)s.%(ext)s" -P "$FINAL_PATH" "$SINGLE_URL" >> "$LOG_FILE" 2>&1
-            done
+            done <<< "$(echo "$MV_VIDS" | tr ' ' '\n' | grep -v '^$')"
         fi
         if [ -z "$NORMAL_SELECTION" ] && [ -z "$MV_VIDS" ]; then
-            log "🚚 下载..."
+            log "🚚 Downloading..."
             DOWNLOAD_ARGS=""
             [ "$SELECTION" != "ALL" ] && DOWNLOAD_ARGS="--playlist-items $SELECTION"
             "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
@@ -724,11 +859,11 @@ for album_entry in "${ALBUMS[@]}"; do
                 -o "%(artist,uploader)s - %(title)s.%(ext)s" -P "$FINAL_PATH" "$url" >> "$LOG_FILE" 2>&1
         fi
     fi
-    log "✅ 下载完成"
+    log "✅ Download complete"
 
-    # ── MV 单曲后处理 ──
+    # ── MV single post-processing ──
     if [ "$IS_MV_SINGLE" = true ]; then
-        log "🏷️ MV单曲后处理..."
+        log "🏷️ MV single post-processing..."
         for mv_f in "$FINAL_PATH"/temp_mv_*.opus; do
             [ -f "$mv_f" ] || continue
             SAFE_ARTIST=$(echo "$MV_ARTIST" | sed 's/[\/:*?"<>|]/-/g')
@@ -737,7 +872,7 @@ for album_entry in "${ALBUMS[@]}"; do
             NEW_PATH="$FINAL_PATH/$NEW_NAME"
             [ -f "$NEW_PATH" ] && NEW_PATH="$FINAL_PATH/${SAFE_ARTIST} - ${SAFE_TITLE}_$(date +%s).opus"
             mv "$mv_f" "$NEW_PATH"
-            log " 📝 重命名: $(basename "$mv_f") → $NEW_NAME"
+            log "  📝 Renamed: $(basename "$mv_f") → $NEW_NAME"
 
             CF=""; JSON_FILE="${NEW_PATH%.opus}.info.json"
             [ ! -f "$JSON_FILE" ] && JSON_FILE=$(find "$FINAL_PATH" -name "temp_mv_*.info.json" 2>/dev/null | head -1)
@@ -745,7 +880,7 @@ for album_entry in "${ALBUMS[@]}"; do
                 if download_cover "$JSON_FILE" CF; then
                     CC="/tmp/cover_$$_compressed.jpg"
                     cover_compress "$CF" "$CC" 2>/dev/null
-                    if [ -f "$CC" ]; then rm -f "$CF"; CF="$CC"; log "  🖼️ 封面已压缩"; fi
+                    if [ -f "$CC" ]; then rm -f "$CF"; CF="$CC"; log "  🖼️ Cover compressed"; fi
                 fi
                 rm -f "$JSON_FILE"
             fi
@@ -754,46 +889,57 @@ for album_entry in "${ALBUMS[@]}"; do
             echo "$NEW_PATH" >> /tmp/existing_before_$$.txt
         done
         rm -f "$FINAL_PATH"/temp_mv_* "$FINAL_PATH"/*.webm 2>/dev/null
-        log "🎉 完成: $ALBUM_NAME"
+        log "🎉 Done: $ALBUM_NAME"
         continue
     fi
 
-    # ── 策略 2 后处理 ──
+    # ── Strategy 2 post-processing (default mode) ──
     if [ "$MV_STRATEGY" = "2" ]; then
-        log "🏷️ 默认值后处理..."
+        log "🏷️ Default mode post-processing..."
         for f in "$FINAL_PATH"/*.opus; do
             [ -f "$f" ] || continue
             [[ "$(basename "$f")" == temp_* ]] && continue
             if grep -qxF "$f" /tmp/existing_before_$$.txt 2>/dev/null; then
-                log " ⏭️ 跳过已存在: $(basename "$f")"
+                log "  ⏭️ Skipping existing: $(basename "$f")"
                 continue
             fi
             JSON_FILE="${f%.opus}.info.json"
-            TITLE=""
-            [ -f "$JSON_FILE" ] && TITLE=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('title',''))" "$JSON_FILE" 2>/dev/null)
+            TITLE=""; SA=""; REAL_ALBUM=""; HS=false
+            if [ -f "$JSON_FILE" ]; then
+                TITLE=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('title',''))" "$JSON_FILE" 2>/dev/null)
+                SA=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('artist',''))" "$JSON_FILE" 2>/dev/null)
+                REAL_ALBUM=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('album',''))" "$JSON_FILE" 2>/dev/null)
+                [ -n "$TITLE" ] && [ -n "$SA" ] && HS=true
+            fi
             CF=""
             if [ -f "$JSON_FILE" ]; then
                 if download_cover "$JSON_FILE" CF; then
-                    CC="/tmp/cover_$$_compressed.jpg"
-                    cover_compress "$CF" "$CC" 2>/dev/null
-                    if [ -f "$CC" ]; then rm -f "$CF"; CF="$CC"; fi
+                    if [ "$HS" = "true" ]; then
+                        CC="/tmp/cover_$$_cropped.jpg"
+                        cover_crop_center "$CF" "$CC" 2>/dev/null
+                        if [ -f "$CC" ]; then rm -f "$CF"; CF="$CC"; log "  🖼️ Cover cropped (metadata)"; fi
+                    else
+                        CC="/tmp/cover_$$_compressed.jpg"
+                        cover_compress "$CF" "$CC" 2>/dev/null
+                        if [ -f "$CC" ]; then rm -f "$CF"; CF="$CC"; log "  🖼️ Cover compressed (no metadata)"; fi
+                    fi
                 fi
                 rm -f "$JSON_FILE"
             fi
-            FINAL_ALBUM="$TITLE"
+            [ -n "$REAL_ALBUM" ] && FINAL_ALBUM="$REAL_ALBUM" || FINAL_ALBUM="$TITLE"
             embed_cover "$f" "" "$ALBUM_NAME" "$([ -n "$CF" ] && echo true || echo false)" "true" "$FINAL_ALBUM" "$CF" >> "$LOG_FILE" 2>&1
             [ -n "$CF" ] && rm -f "$CF"
             echo "$f" >> /tmp/existing_before_$$.txt
         done
         rm -f "$FINAL_PATH"/*.info.json "$FINAL_PATH"/*.webm 2>/dev/null
         rm -f /tmp/existing_before_$$.txt
-        log "🎉 完成: $ALBUM_NAME"
+        log "🎉 Done: $ALBUM_NAME"
         continue
     fi
 
-    # ── MV曲目后处理（策略1）──
+    # ── Strategy 1 MV track post-processing (with meta fallback) ──
     if [ -n "$MV_VIDS" ] && [ "$MV_STRATEGY" = "1" ]; then
-        log "🏷️ MV曲目后处理..."
+        log "🏷️ MV track post-processing..."
         for mv_f in "$FINAL_PATH"/temp_mv_*.opus; do
             [ -f "$mv_f" ] || continue
             JSON_FILE="${mv_f%.opus}.info.json"
@@ -807,13 +953,25 @@ for album_entry in "${ALBUMS[@]}"; do
                 NEW_PATH="$FINAL_PATH/$NEW_NAME"
                 [ -f "$NEW_PATH" ] && NEW_PATH="$FINAL_PATH/${SAFE_ARTIST} - ${SAFE_TITLE}_$(date +%s).opus"
                 mv "$mv_f" "$NEW_PATH"
-                log " 📝 重命名: $(basename "$mv_f") → $NEW_NAME"
+                log "  📝 Renamed: $(basename "$mv_f") → $NEW_NAME"
                 CF=""
+                # Check metadata for cropping decision (fallback)
+                SA_META=""; HS=false
+                if [ -f "$JSON_FILE" ]; then
+                    SA_META=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('artist',''))" "$JSON_FILE" 2>/dev/null)
+                    [ -n "$TITLE" ] && [ -n "$SA_META" ] && HS=true
+                fi
                 if [ -f "$JSON_FILE" ]; then
                     if download_cover "$JSON_FILE" CF; then
-                        CC="/tmp/cover_$$_compressed.jpg"
-                        cover_compress "$CF" "$CC" 2>/dev/null
-                        if [ -f "$CC" ]; then rm -f "$CF"; CF="$CC"; fi
+                        if [ "$HS" = "true" ]; then
+                            CC="/tmp/cover_$$_cropped.jpg"
+                            cover_crop_center "$CF" "$CC" 2>/dev/null
+                            if [ -f "$CC" ]; then rm -f "$CF"; CF="$CC"; log "  🖼️ Cover cropped (metadata fallback)"; fi
+                        else
+                            CC="/tmp/cover_$$_compressed.jpg"
+                            cover_compress "$CF" "$CC" 2>/dev/null
+                            if [ -f "$CC" ]; then rm -f "$CF"; CF="$CC"; log "  🖼️ Cover compressed (no metadata)"; fi
+                        fi
                     fi
                 fi
                 FINAL_ALBUM="${ALBUM:-$TITLE}"
@@ -825,13 +983,13 @@ for album_entry in "${ALBUMS[@]}"; do
         done
     fi
 
-    # ── 正常后处理 ──
-    log "🏷️ 后处理..."
+    # ── Normal post-processing ──
+    log "🏷️ Post-processing..."
     for f in "$FINAL_PATH"/*.opus; do
         [ -f "$f" ] || continue
         [[ "$(basename "$f")" == temp_* || "$(basename "$f")" == temp_mv_* ]] && continue
         if grep -qxF "$f" /tmp/existing_before_$$.txt 2>/dev/null; then
-            log " ⏭️ 跳过已存在: $(basename "$f")"
+            log "  ⏭️ Skipping existing: $(basename "$f")"
             continue
         fi
         ORIG_ALBUM=""; CF=""; HC="false"
@@ -842,22 +1000,22 @@ for album_entry in "${ALBUMS[@]}"; do
                 SA=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('artist',''))" "$JSON_FILE" 2>/dev/null)
                 HS=false
                 [ -n "$ORIG_ALBUM" ] && [ -n "$SA" ] && HS=true
-                log " 📀 元数据: $HS"
+                log "  📀 Metadata: $HS"
                 if download_cover "$JSON_FILE" CF; then
                     if [ "$HS" = "true" ]; then
                         CC="/tmp/cover_$$_cropped.jpg"
                         if cover_crop_center "$CF" "$CC"; then
                             rm -f "$CF"; CF="$CC"; HC="true"
-                            log "  🖼️ 封面已居中裁剪"
+                            log "  🖼️ Cover cropped (1:1)"
                         else
-                            log "  ⚠️ 裁剪失败，使用原图"
+                            log "  ⚠️ Crop failed, using original"
                             HC="true"
                         fi
                     else
                         CC="/tmp/cover_$$_compressed.jpg"
                         if cover_compress "$CF" "$CC"; then
                             rm -f "$CF"; CF="$CC"; HC="true"
-                            log "  🖼️ 封面已压缩"
+                            log "  🖼️ Cover compressed"
                         else
                             HC="true"
                         fi
@@ -870,7 +1028,7 @@ for album_entry in "${ALBUMS[@]}"; do
             if [ -f "$FINAL_PATH/cover.jpg" ] && [ "$(file_size "$FINAL_PATH/cover.jpg" 2>/dev/null)" -gt 10240 ]; then
                 CF="$FINAL_PATH/cover.jpg"
                 HC="true"
-                log "  🖼️ 使用统一封面"
+                log "  🖼️ Using unified cover"
             fi
         fi
         embed_cover "$f" "$ALBUM_ARTIST" "$ALBUM_NAME" "$HC" "$ENHANCED_MODE" "$ORIG_ALBUM" "$CF" >> "$LOG_FILE" 2>&1
@@ -879,7 +1037,7 @@ for album_entry in "${ALBUMS[@]}"; do
 
     rm -f "$FINAL_PATH"/*.info.json "$FINAL_PATH"/*.webm 2>/dev/null
     rm -f /tmp/existing_before_$$.txt
-    log "🎉 完成: $ALBUM_NAME"
+    log "🎉 Done: $ALBUM_NAME"
 done
 
 rm -f "$0"
@@ -891,6 +1049,11 @@ nohup bash "$WORKER_SH" >> "$LOG_FILE" 2>&1 &
 WORKER_PID=$!
 
 echo ""
-echo "📝 日志: tail -n +1 -f \"$LOG_FILE\""
-echo "🚀 切入后台..."
+if is_en; then
+    echo "📝 Log: tail -n +1 -f \"$LOG_FILE\""
+    echo "🚀 Running in the background..."
+else
+    echo "📝 日志: tail -n +1 -f \"$LOG_FILE\""
+    echo "🚀 切入后台..."
+fi
 echo "✅ PID: $WORKER_PID"

@@ -3,66 +3,40 @@
 # melodyminer (拾音) 配置引导脚本 mm_setup.sh
 # ═════════════════════════════════════════════════
 
+# ── bash 版本检查 ──────────────────────────────
+if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+    echo ""
+    echo "❌ bash 4.0+ is required to run melodyminer."
+    echo ""
+    echo "  Your current bash version: $BASH_VERSION"
+    echo ""
+    echo "  macOS users:"
+    echo "    brew install bash"
+    echo "    Then run this script with the new bash:"
+    echo "    /usr/local/bin/bash mm_setup.sh"
+    echo ""
+    echo "  Linux users: please upgrade bash via your package manager."
+    echo ""
+    exit 1
+fi
+
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/mm_config.sh"
 
 echo "=================================================="
-echo " 🎵 melodyminer 配置引导 / Setup"
+echo " 🎵 melodyminer Setup / 配置引导"
 echo "=================================================="
 echo ""
-echo "请选择语言 / Please select language:"
-echo " [1] 中文 (默认)"
-echo " [2] English (main script interface coming in V2.8.0)"
-echo -n "选择 / Select [1/2]: "
+echo "Please select language / 请选择语言:"
+echo " [1] English (default)"
+echo " [2] 中文"
+echo -n "Select / 选择 [1/2]: "
 read -r LANG_CHOICE
 [ -z "$LANG_CHOICE" ] && LANG_CHOICE="1"
 
 if [ "$LANG_CHOICE" == "2" ]; then
-    MM_LANG="en"
-    MSG_WELCOME="🎵 melodyminer Setup"
-    MSG_CHECK_DEP="🔍 Checking dependencies..."
-    MSG_YTDLP_FOUND="  ✅ yt-dlp:"
-    MSG_FFMPEG_FOUND="  ✅ ffmpeg:"
-    MSG_PYTHON_FOUND="  ✅ python3:"
-    MSG_NODE_FOUND="  ✅ node:"
-    MSG_CHECK_MODULES="🔍 Checking Python modules..."
-    MSG_MUTAGEN_OK="  ✅ mutagen"
-    MSG_MISSING_DEP="❌ Missing required dependencies:"
-    MSG_INSTALL_MACOS="  macOS:  brew install yt-dlp ffmpeg"
-    MSG_INSTALL_LINUX="  Linux:  pip3 install yt-dlp && sudo apt install ffmpeg"
-    MSG_RETRY="Please install and rerun this script."
-    MSG_CONFIG_DIR="── 📂 Music Directory Configuration ──"
-    MSG_DEFAULT_PATH="  Default:"
-    MSG_INPUT_PROMPT="  Enter path (Enter to use default): "
-    MSG_DIR_NOT_EXIST="  ⚠️ Directory does not exist, create it? [Y/n]: "
-    MSG_DIR_CREATED="  ✅ Created:"
-    MSG_MUSIC_DIR="  ✅ Music directory:"
-    MSG_DEFAULT_ARTIST="── 🎤 Default Artist Folder ──"
-    MSG_INPUT_ARTIST_PROMPT="  Enter (Enter to use 'melodyminer'): "
-    MSG_DEFAULT_ARTIST_SET="  ✅ Default artist folder:"
-    MSG_AUDIO_FORMAT="── 🎵 Audio Format ──"
-    MSG_USING_OPUS="  ✅ Using opus (m4a support coming soon)"
-    MSG_GEN_CONFIG="── 📝 Generating Config File ──"
-    MSG_CONFIG_SAVED="  ✅ Config file saved:"
-    MSG_DONE="🎉 Setup complete!"
-    MSG_USAGE="Usage:"
-    MSG_RUN_CMD="  bash melodyminer.sh"
-    MSG_MODIFY_CONFIG="Modify config:"
-    MSG_EDIT_CMD="  Edit $CONFIG_FILE"
-    MSG_RECONFIGURE="Reconfigure:"
-    MSG_RERUN_CMD="  bash mm_setup.sh"
-    MSG_HIDDEN_FOLDERS="── 🗂️ Hidden Folders ──"
-    MSG_SELECT_HIDE="  Select folders to hide (e.g., attachments):"
-    MSG_INPUT_HIDE="  Enter folder numbers to hide (comma separated, Enter to skip): "
-    MSG_HIDE_ADDED="  ✅ Added to hidden folders:"
-    MSG_SELECT_DEFAULT="  Select default artist folder:"
-    MSG_NEW_FOLDER="  [0] Create new folder"
-    MSG_INPUT_NEW="  Enter new folder name: "
-    MSG_DEFAULT_MARK=" (default)"
-    MSG_SELECT_PROMPT="Select number or enter name (Enter for default[1]): "
-else
     MM_LANG="zh"
     MSG_WELCOME="🎵 melodyminer (拾音) 配置引导"
     MSG_CHECK_DEP="🔍 检查依赖环境..."
@@ -70,6 +44,7 @@ else
     MSG_FFMPEG_FOUND="  ✅ ffmpeg:"
     MSG_PYTHON_FOUND="  ✅ python3:"
     MSG_NODE_FOUND="  ✅ node:"
+    MSG_NODE_MISSING="  ⚠️  node: 未找到（部分链接可能需要，建议安装）"
     MSG_CHECK_MODULES="🔍 检查 Python 模块..."
     MSG_MUTAGEN_OK="  ✅ mutagen"
     MSG_MISSING_DEP="❌ 缺少必要依赖:"
@@ -105,6 +80,50 @@ else
     MSG_INPUT_NEW="  请输入新文件夹名称: "
     MSG_DEFAULT_MARK=" （默认）"
     MSG_SELECT_PROMPT="请选择编号或直接输入名称 (直接回车默认[1]): "
+else
+    MM_LANG="en"
+    MSG_WELCOME="🎵 melodyminer Setup"
+    MSG_CHECK_DEP="🔍 Checking dependencies..."
+    MSG_YTDLP_FOUND="  ✅ yt-dlp:"
+    MSG_FFMPEG_FOUND="  ✅ ffmpeg:"
+    MSG_PYTHON_FOUND="  ✅ python3:"
+    MSG_NODE_FOUND="  ✅ node:"
+    MSG_NODE_MISSING="  ⚠️  node: not found (recommended — required by yt-dlp for some links)"
+    MSG_CHECK_MODULES="🔍 Checking Python modules..."
+    MSG_MUTAGEN_OK="  ✅ mutagen"
+    MSG_MISSING_DEP="❌ Missing required dependencies:"
+    MSG_INSTALL_MACOS="  macOS:  brew install yt-dlp ffmpeg"
+    MSG_INSTALL_LINUX="  Linux:  pip3 install yt-dlp && sudo apt install ffmpeg"
+    MSG_RETRY="Please install and rerun this script."
+    MSG_CONFIG_DIR="── 📂 Music Directory Configuration ──"
+    MSG_DEFAULT_PATH="  Default:"
+    MSG_INPUT_PROMPT="  Enter path (Enter to use default): "
+    MSG_DIR_NOT_EXIST="  ⚠️ Directory does not exist, create it? [Y/n]: "
+    MSG_DIR_CREATED="  ✅ Created:"
+    MSG_MUSIC_DIR="  ✅ Music directory:"
+    MSG_DEFAULT_ARTIST="── 🎤 Default Artist Folder ──"
+    MSG_INPUT_ARTIST_PROMPT="  Enter (Enter to use 'melodyminer'): "
+    MSG_DEFAULT_ARTIST_SET="  ✅ Default artist folder:"
+    MSG_AUDIO_FORMAT="── 🎵 Audio Format ──"
+    MSG_USING_OPUS="  ✅ Using opus (m4a support coming soon)"
+    MSG_GEN_CONFIG="── 📝 Generating Config File ──"
+    MSG_CONFIG_SAVED="  ✅ Config file saved:"
+    MSG_DONE="🎉 Setup complete!"
+    MSG_USAGE="Usage:"
+    MSG_RUN_CMD="  bash melodyminer.sh"
+    MSG_MODIFY_CONFIG="Modify config:"
+    MSG_EDIT_CMD="  Edit $CONFIG_FILE"
+    MSG_RECONFIGURE="Reconfigure:"
+    MSG_RERUN_CMD="  bash mm_setup.sh"
+    MSG_HIDDEN_FOLDERS="── 🗂️ Hidden Folders ──"
+    MSG_SELECT_HIDE="  Select folders to hide (e.g., attachments):"
+    MSG_INPUT_HIDE="  Enter folder numbers to hide (comma separated, Enter to skip): "
+    MSG_HIDE_ADDED="  ✅ Added to hidden folders:"
+    MSG_SELECT_DEFAULT="  Select default artist folder:"
+    MSG_NEW_FOLDER="  [0] Create new folder"
+    MSG_INPUT_NEW="  Enter new folder name: "
+    MSG_DEFAULT_MARK=" (default)"
+    MSG_SELECT_PROMPT="Select number or enter name (Enter for default[1]): "
 fi
 
 echo "=================================================="
@@ -125,21 +144,21 @@ elif [ -f "$HOME/.local/bin/yt-dlp" ]; then
     YTDLP_PATH="$HOME/.local/bin/yt-dlp"
     echo "$MSG_YTDLP_FOUND $YTDLP_PATH"
 else
-    echo "  ❌ yt-dlp: 未找到"
+    echo "  ❌ yt-dlp: not found"
     MISSING+=("yt-dlp")
 fi
 
 if command -v ffmpeg &>/dev/null; then
     echo "$MSG_FFMPEG_FOUND $(command -v ffmpeg)"
 else
-    echo "  ❌ ffmpeg: 未找到"
+    echo "  ❌ ffmpeg: not found"
     MISSING+=("ffmpeg")
 fi
 
 if command -v python3 &>/dev/null; then
     echo "$MSG_PYTHON_FOUND $(command -v python3)"
 else
-    echo "  ❌ python3: 未找到"
+    echo "  ❌ python3: not found"
     MISSING+=("python3")
 fi
 
@@ -148,12 +167,12 @@ if command -v node &>/dev/null; then
     NODE_PATH=$(command -v node)
     echo "$MSG_NODE_FOUND $NODE_PATH"
 else
-    echo "  ⚠️  node: 未找到（部分链接可能需要，建议安装）"
+    echo "$MSG_NODE_MISSING"
 fi
 
 echo ""
 echo "$MSG_CHECK_MODULES"
-python3 -c "import mutagen" 2>/dev/null && echo "$MSG_MUTAGEN_OK" || { echo "  ❌ mutagen 未安装"; MISSING+=("python3-mutagen"); }
+python3 -c "import mutagen" 2>/dev/null && echo "$MSG_MUTAGEN_OK" || { echo "  ❌ mutagen not installed  (pip3 install mutagen)"; MISSING+=("python3-mutagen"); }
 
 if [ ${#MISSING[@]} -gt 0 ]; then
     echo ""
@@ -168,6 +187,7 @@ fi
 
 echo ""
 
+# ── 音乐目录 ──────────────────────────────────
 echo "$MSG_CONFIG_DIR"
 echo ""
 DEFAULT_BASE="$HOME/navidrome/music"
@@ -184,6 +204,7 @@ fi
 echo "$MSG_MUSIC_DIR $BASE_DIR"
 echo ""
 
+# ── 默认歌手文件夹 ────────────────────────────
 echo "$MSG_DEFAULT_ARTIST"
 echo ""
 
@@ -205,6 +226,7 @@ done
 echo "$MSG_NEW_FOLDER" >&2
 echo -n "$MSG_SELECT_PROMPT" >&2
 read -r CHOICE
+
 if [ -z "$CHOICE" ]; then
     DEFAULT_ARTIST_DIR="${folders[0]}"
 elif [[ "$CHOICE" =~ ^[0-9]+$ ]] && [ "$CHOICE" -gt 0 ] && [ "$CHOICE" -le "${#folders[@]}" ]; then
@@ -219,11 +241,13 @@ fi
 echo "$MSG_DEFAULT_ARTIST_SET $DEFAULT_ARTIST_DIR"
 echo ""
 
+# ── 音频格式 ──────────────────────────────────
 AUDIO_FORMAT="opus"
 echo "$MSG_AUDIO_FORMAT"
 echo "$MSG_USING_OPUS"
 echo ""
 
+# ── 隐藏文件夹 ────────────────────────────────
 echo "$MSG_HIDDEN_FOLDERS"
 echo ""
 
@@ -253,43 +277,61 @@ if [ ${#all_dirs[@]} -gt 0 ]; then
     fi
 fi
 
-mapfile -t HIDDEN_DIRS < <(printf "%s\n" "${HIDDEN_DIRS[@]}" | sort -u)
+# bash 4+ 兼容写法替代 mapfile
+HIDDEN_DIRS_SORTED=()
+while IFS= read -r line; do
+    HIDDEN_DIRS_SORTED+=("$line")
+done < <(printf "%s\n" "${HIDDEN_DIRS[@]}" | sort -u)
+HIDDEN_DIRS=("${HIDDEN_DIRS_SORTED[@]}")
+
 echo "$MSG_HIDE_ADDED ${HIDDEN_DIRS[*]}"
 echo ""
 
+# ── 生成配置文件 ──────────────────────────────
 echo "$MSG_GEN_CONFIG"
+
+shell_quote() {
+    printf "%q" "$1"
+}
 
 HIDDEN_DIRS_STR="("
 for hd in "${HIDDEN_DIRS[@]}"; do
-    HIDDEN_DIRS_STR+="\"$hd\" "
+    HIDDEN_DIRS_STR+="$(shell_quote "$hd") "
 done
 HIDDEN_DIRS_STR+=")"
+
+MM_LANG_Q=$(shell_quote "$MM_LANG")
+BASE_DIR_Q=$(shell_quote "$BASE_DIR")
+YTDLP_PATH_Q=$(shell_quote "$YTDLP_PATH")
+NODE_PATH_Q=$(shell_quote "${NODE_PATH:-}")
+DEFAULT_ARTIST_DIR_Q=$(shell_quote "$DEFAULT_ARTIST_DIR")
+AUDIO_FORMAT_Q=$(shell_quote "$AUDIO_FORMAT")
 
 cat > "$CONFIG_FILE" << CFGEOF
 #!/bin/bash
 # melodyminer (拾音) 配置文件
 # 由 mm_setup.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')
 
-# 语言设置 (zh/en)
-MM_LANG="$MM_LANG"
+# 语言设置 (en/zh)
+MM_LANG=$MM_LANG_Q
 
 # 音乐库根目录
-BASE_DIR="$BASE_DIR"
+BASE_DIR=$BASE_DIR_Q
 
 # yt-dlp 路径
-YTDLP="$YTDLP_PATH"
+YTDLP=$YTDLP_PATH_Q
 
 # node 路径（yt-dlp 解析用，留空则自动检测）
-NODE_PATH="${NODE_PATH:-}"
+NODE_PATH=$NODE_PATH_Q
 
 # 默认歌手文件夹
-DEFAULT_ARTIST_DIR="$DEFAULT_ARTIST_DIR"
+DEFAULT_ARTIST_DIR=$DEFAULT_ARTIST_DIR_Q
 
 # 隐藏文件夹（在歌手选择界面中不显示）
 HIDDEN_DIRS=$HIDDEN_DIRS_STR
 
 # 音频格式: opus (m4a 将在后续版本支持)
-AUDIO_FORMAT="$AUDIO_FORMAT"
+AUDIO_FORMAT=$AUDIO_FORMAT_Q
 
 # 播放列表下载间隔（秒，0=不限制）
 PLAYLIST_SLEEP_REQUESTS=0
