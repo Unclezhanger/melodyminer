@@ -61,7 +61,10 @@ if [ "$LANG_CHOICE" == "2" ]; then
     MSG_INPUT_ARTIST_PROMPT="  请输入 (回车使用 'melodyminer'): "
     MSG_DEFAULT_ARTIST_SET="  ✅ 默认歌手文件夹:"
     MSG_AUDIO_FORMAT="── 🎵 音频格式 ──"
-    MSG_USING_OPUS="  ✅ 当前使用: opus（m4a 支持将在后续版本添加）"
+    MSG_FORMAT_PROMPT="  请选择格式 [1/2]: "
+    MSG_FORMAT_OPUS="  [1] Opus（默认，体积小，兼容性好）"
+    MSG_FORMAT_M4A="  [2] M4A（AAC，Apple 设备原生支持）"
+    MSG_FORMAT_SET="  ✅ 音频格式:"
     MSG_GEN_CONFIG="── 📝 生成配置文件 ──"
     MSG_CONFIG_SAVED="  ✅ 配置文件已保存:"
     MSG_DONE="🎉 配置完成！"
@@ -105,7 +108,10 @@ else
     MSG_INPUT_ARTIST_PROMPT="  Enter (Enter to use 'melodyminer'): "
     MSG_DEFAULT_ARTIST_SET="  ✅ Default artist folder:"
     MSG_AUDIO_FORMAT="── 🎵 Audio Format ──"
-    MSG_USING_OPUS="  ✅ Using opus (m4a support coming soon)"
+    MSG_FORMAT_PROMPT="  Select format [1/2]: "
+    MSG_FORMAT_OPUS="  [1] Opus (default, smaller size, widely supported)"
+    MSG_FORMAT_M4A="  [2] M4A (AAC, native support on Apple devices)"
+    MSG_FORMAT_SET="  ✅ Audio format:"
     MSG_GEN_CONFIG="── 📝 Generating Config File ──"
     MSG_CONFIG_SAVED="  ✅ Config file saved:"
     MSG_DONE="🎉 Setup complete!"
@@ -242,9 +248,17 @@ echo "$MSG_DEFAULT_ARTIST_SET $DEFAULT_ARTIST_DIR"
 echo ""
 
 # ── 音频格式 ──────────────────────────────────
-AUDIO_FORMAT="opus"
 echo "$MSG_AUDIO_FORMAT"
-echo "$MSG_USING_OPUS"
+echo "$MSG_FORMAT_OPUS"
+echo "$MSG_FORMAT_M4A"
+echo -n "$MSG_FORMAT_PROMPT"
+read -r FMT_CHOICE
+if [ "$FMT_CHOICE" == "2" ]; then
+    AUDIO_FORMAT="m4a"
+else
+    AUDIO_FORMAT="opus"
+fi
+echo "$MSG_FORMAT_SET $AUDIO_FORMAT"
 echo ""
 
 # ── 隐藏文件夹 ────────────────────────────────
@@ -330,7 +344,7 @@ DEFAULT_ARTIST_DIR=$DEFAULT_ARTIST_DIR_Q
 # 隐藏文件夹（在歌手选择界面中不显示）
 HIDDEN_DIRS=$HIDDEN_DIRS_STR
 
-# 音频格式: opus (m4a 将在后续版本支持)
+# 音频格式: opus / m4a
 AUDIO_FORMAT=$AUDIO_FORMAT_Q
 
 # 播放列表下载间隔（秒，0=不限制）

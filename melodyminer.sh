@@ -1,12 +1,12 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-# melodyminer (拾音) V2.8.5
-# 修复: MV策略1中带"-"的VID导致grep报错(while read + grep -F --)
-# 修复: input_mv_full的read重定向到/dev/tty防止被here-string吞掉
-# 优化: 移除无意义的MV数量提示
-# 优化: 文件夹3列、曲目2列显示(修复对齐)
-# 增强: MV策略1后处理兜底检测meta,有meta裁剪封面+真实album
-# 保留: 播放列表类型选择、后台英文化、V2.8.3策略2后处理修正
+# melodyminer (拾音) V2.8.6
+# 新增: M4A 格式支持（配置脚本选择，mutagen 双格式后处理）
+# 修复: SELECTION 为空时 --playlist-items "" 导致 yt-dlp 报错
+# 修复: parse_mv_info 中 cut -d= 无法处理标题含 = 的情况（sanitize 改用 ＝）
+# 修复: grep -F VID 改为 |VID| 精确匹配，避免子串误匹配
+# 修复: TRACK_COUNT 无数字校验导致整数比较报错
+# 保留: 播放列表类型选择、后台英文化、V2.8.5 所有改动
 # ─────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,7 +70,7 @@ ask() {
 }
 
 echo "=================================================="
-echo " 🎵 melodyminer (拾音) V2.8.5"
+echo " 🎵 melodyminer (拾音) V2.8.6"
 echo "=================================================="
 say "支持: 专辑 / 播放列表 / YTM电台 / 单曲" "Supports: albums / playlists / YTM radios / singles"
 echo "=================================================="
@@ -226,9 +226,9 @@ input_mv_full() {
     if is_en; then echo -n "Album [${t}]: " >&2
     else echo -n "专辑 [${t}]: " >&2; fi
     read -r al < /dev/tty; [ -z "$al" ] && al="$t"
-    t=$(echo "$t" | sed 's/|/｜/g')
-    a=$(echo "$a" | sed 's/|/｜/g')
-    al=$(echo "$al" | sed 's/|/｜/g')
+    t=$(echo "$t" | sed 's/|/｜/g; s/=/＝/g')
+    a=$(echo "$a" | sed 's/|/｜/g; s/=/＝/g')
+    al=$(echo "$al" | sed 's/|/｜/g; s/=/＝/g')
     echo "${t}|${a}|${al}"
 }
 
@@ -373,16 +373,19 @@ for idx in "${!VALID_URLS[@]}"; do
         IS_ALBUM=true; HAS_METADATA="True"
         INFO=$(get_album_info "$url")
         DISPLAY_NAME=$(echo "$INFO" | sed -n '1p'); TRACK_COUNT=$(echo "$INFO" | sed -n '2p')
+        [[ "$TRACK_COUNT" =~ ^[0-9]+$ ]] || TRACK_COUNT=0
         DISPLAY_ARTIST=$(echo "$INFO" | sed -n '3p'); SONG_LIST=$(echo "$INFO" | tail -n +4)
     elif [ "$TYPE" == "ytm_radio" ]; then
         IS_YTM_RADIO=true
         INFO=$(get_playlist_info "$url")
         DISPLAY_NAME=$(echo "$INFO" | sed -n '1p'); TRACK_COUNT=$(echo "$INFO" | sed -n '2p')
+        [[ "$TRACK_COUNT" =~ ^[0-9]+$ ]] || TRACK_COUNT=0
         SONG_LIST_FULL=$(echo "$INFO" | tail -n +3); SONG_LIST=$(echo "$SONG_LIST_FULL" | sed 's/|.*//')
     elif [ "$TYPE" == "playlist" ]; then
         IS_PLAYLIST=true
         INFO=$(get_playlist_info "$url")
         DISPLAY_NAME=$(echo "$INFO" | sed -n '1p'); TRACK_COUNT=$(echo "$INFO" | sed -n '2p')
+        [[ "$TRACK_COUNT" =~ ^[0-9]+$ ]] || TRACK_COUNT=0
         SONG_LIST_FULL=$(echo "$INFO" | tail -n +3); SONG_LIST=$(echo "$SONG_LIST_FULL" | sed 's/|.*//')
     else
         IS_SINGLE=true
@@ -557,7 +560,7 @@ for idx in "${!VALID_URLS[@]}"; do
                 MV_INFO=""
                 while IFS= read -r VID; do
                     [ -z "$VID" ] && continue
-                    LINE=$(echo "$SONG_LIST_FULL" | grep -F -- "$VID")
+                    LINE=$(echo "$SONG_LIST_FULL" | grep -F -- "|$VID|")
                     [ -z "$LINE" ] && continue
                     INUM=$(echo "$LINE" | sed 's/^\([0-9]*\)\. .*/\1/')
                     RAW_TITLE=$(echo "$LINE" | sed 's/^[0-9]*\. //; s/|[^|]*|[^|]*$//')
@@ -606,6 +609,14 @@ YTDLP="__YTDLP__"
 NODE_ARGS="__NODE_ARGS__"
 LOG_FILE="__LOG_FILE__"
 AUDIO_FORMAT="__AUDIO_FORMAT__"
+
+if [ "$AUDIO_FORMAT" = "m4a" ]; then
+    AUDIO_EXT="m4a"
+    FORMAT_ARGS=(-f "ba[ext=m4a]/ba" --audio-format m4a --audio-quality 0)
+else
+    AUDIO_EXT="opus"
+    FORMAT_ARGS=(-f ba -x --audio-format opus --audio-quality 0)
+fi
 SLEEP_REQUESTS="__SLEEP_REQUESTS__"
 SLEEP_INTERVAL="__SLEEP_INTERVAL__"
 
@@ -638,25 +649,41 @@ cover_compress() {
 mv_write_id3() {
     python3 - "$@" << 'PYEOF'
 import sys, os
-from mutagen.oggopus import OggOpus
 fpath = sys.argv[1]; title = sys.argv[2]; artist = sys.argv[3]
 album = sys.argv[4]; album_artist = sys.argv[5]; cover_file = sys.argv[6] if len(sys.argv) > 6 else ""
-audio = OggOpus(fpath)
-audio['title'] = [title]
-audio['artist'] = [artist]
-if album: audio['album'] = [album]
-elif 'album' in audio: del audio['album']
-if album_artist: audio['album_artist'] = [album_artist]
-elif 'album_artist' in audio: del audio['album_artist']
-if cover_file and os.path.exists(cover_file):
-    from mutagen.flac import Picture
-    import base64
-    with open(cover_file, 'rb') as img:
-        pic = Picture(); pic.data = img.read(); pic.type = 3; pic.mime = 'image/jpeg'
-        audio['metadata_block_picture'] = [base64.b64encode(pic.write()).decode('ascii')]
-    print(f'  ✅ +Cover: {os.path.basename(fpath)}')
+if fpath.endswith('.m4a'):
+    from mutagen.mp4 import MP4, MP4Cover
+    audio = MP4(fpath)
+    audio['\xa9nam'] = [title]
+    audio['\xa9ART'] = [artist]
+    if album: audio['\xa9alb'] = [album]
+    elif '\xa9alb' in audio: del audio['\xa9alb']
+    if album_artist: audio['aART'] = [album_artist]
+    elif 'aART' in audio: del audio['aART']
+    if cover_file and os.path.exists(cover_file):
+        with open(cover_file, 'rb') as img:
+            audio['covr'] = [MP4Cover(img.read(), imageformat=MP4Cover.FORMAT_JPEG)]
+        print(f'  ✅ +Cover: {os.path.basename(fpath)}')
+    else:
+        print(f'  ✅ ID3: {os.path.basename(fpath)}')
 else:
-    print(f'  ✅ ID3: {os.path.basename(fpath)}')
+    from mutagen.oggopus import OggOpus
+    audio = OggOpus(fpath)
+    audio['title'] = [title]
+    audio['artist'] = [artist]
+    if album: audio['album'] = [album]
+    elif 'album' in audio: del audio['album']
+    if album_artist: audio['album_artist'] = [album_artist]
+    elif 'album_artist' in audio: del audio['album_artist']
+    if cover_file and os.path.exists(cover_file):
+        from mutagen.flac import Picture
+        import base64
+        with open(cover_file, 'rb') as img:
+            pic = Picture(); pic.data = img.read(); pic.type = 3; pic.mime = 'image/jpeg'
+            audio['metadata_block_picture'] = [base64.b64encode(pic.write()).decode('ascii')]
+        print(f'  ✅ +Cover: {os.path.basename(fpath)}')
+    else:
+        print(f'  ✅ ID3: {os.path.basename(fpath)}')
 audio.save()
 PYEOF
 }
@@ -664,24 +691,39 @@ PYEOF
 embed_cover() {
     python3 - "$@" << 'PYEOF'
 import sys, os, base64
-from mutagen.oggopus import OggOpus
-from mutagen.flac import Picture
 fpath = sys.argv[1]; aa = sys.argv[2]; an = sys.argv[3]
 hc = sys.argv[4]; em = sys.argv[5]; oa = sys.argv[6]; cf = sys.argv[7] if len(sys.argv) > 7 else ""
 try:
-    audio = OggOpus(fpath)
-    if aa and aa not in ('None','SKIP',''): audio['album_artist'] = [aa]
-    elif 'album_artist' in audio: del audio['album_artist']
-    if em=='true' and oa and oa!='None' and not oa.startswith('%'): audio['album'] = [oa]
-    else: audio['album'] = [an]
-    if em=='true' and 'tracknumber' in audio: del audio['tracknumber']
-    if hc=='true' and cf and os.path.exists(cf):
-        with open(cf,'rb') as img:
-            pic=Picture(); pic.data=img.read(); pic.type=3; pic.mime='image/jpeg'
-            audio['metadata_block_picture'] = [base64.b64encode(pic.write()).decode('ascii')]
-        print(f'  ✅ +Cover: {os.path.basename(fpath)}')
+    if fpath.endswith('.m4a'):
+        from mutagen.mp4 import MP4, MP4Cover
+        audio = MP4(fpath)
+        if aa and aa not in ('None','SKIP',''): audio['aART'] = [aa]
+        elif 'aART' in audio: del audio['aART']
+        if em=='true' and oa and oa!='None' and not oa.startswith('%'): audio['\xa9alb'] = [oa]
+        else: audio['\xa9alb'] = [an]
+        if em=='true' and 'trkn' in audio: del audio['trkn']
+        if hc=='true' and cf and os.path.exists(cf):
+            with open(cf,'rb') as img:
+                audio['covr'] = [MP4Cover(img.read(), imageformat=MP4Cover.FORMAT_JPEG)]
+            print(f'  ✅ +Cover: {os.path.basename(fpath)}')
+        else:
+            print(f'  ✅ ID3: {os.path.basename(fpath)}')
     else:
-        print(f'  ✅ ID3: {os.path.basename(fpath)}')
+        from mutagen.oggopus import OggOpus
+        from mutagen.flac import Picture
+        audio = OggOpus(fpath)
+        if aa and aa not in ('None','SKIP',''): audio['album_artist'] = [aa]
+        elif 'album_artist' in audio: del audio['album_artist']
+        if em=='true' and oa and oa!='None' and not oa.startswith('%'): audio['album'] = [oa]
+        else: audio['album'] = [an]
+        if em=='true' and 'tracknumber' in audio: del audio['tracknumber']
+        if hc=='true' and cf and os.path.exists(cf):
+            with open(cf,'rb') as img:
+                pic=Picture(); pic.data=img.read(); pic.type=3; pic.mime='image/jpeg'
+                audio['metadata_block_picture'] = [base64.b64encode(pic.write()).decode('ascii')]
+            print(f'  ✅ +Cover: {os.path.basename(fpath)}')
+        else:
+            print(f'  ✅ ID3: {os.path.basename(fpath)}')
     audio.save()
 except Exception as e:
     print(f'  ❌ Failed: {os.path.basename(fpath)} - {e}')
@@ -784,7 +826,7 @@ for album_entry in "${ALBUMS[@]}"; do
     IS_MV_SINGLE=false
     [ "$TYPE" = "single" ] && [ "$HAS_METADATA" != "True" ] && [ -n "$MV_TITLE" ] && IS_MV_SINGLE=true
 
-    ls "$FINAL_PATH"/*.opus 2>/dev/null > /tmp/existing_before_$$.txt
+    ls "$FINAL_PATH"/*.$AUDIO_EXT 2>/dev/null > /tmp/existing_before_$$.txt
 
     SLEEP_ARGS=""
     { [ "$TYPE" = "playlist" ] || [ "$TYPE" = "ytm_radio" ]; } && [ "$SLEEP_INTERVAL" -gt 0 ] && SLEEP_ARGS="--sleep-requests $SLEEP_REQUESTS --sleep-interval $SLEEP_INTERVAL"
@@ -817,14 +859,14 @@ for album_entry in "${ALBUMS[@]}"; do
         log "🚚 MV single (temp)..."
         "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             --embed-metadata --no-embed-thumbnail --windows-filenames --write-info-json \
-            -f ba -x --audio-format "$AUDIO_FORMAT" --audio-quality 0 \
+            "${FORMAT_ARGS[@]}" \
             -o "temp_mv_%(id)s.%(ext)s" -P "$FINAL_PATH" "$url" >> "$LOG_FILE" 2>&1
     elif [ "$MV_STRATEGY" = "2" ]; then
         log "🚚 Default mode batch..."
         "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             --embed-metadata --no-embed-thumbnail --windows-filenames --yes-playlist \
             --parse-metadata "%(playlist_index)s:%(track_number)s" --write-info-json $SLEEP_ARGS \
-            -f ba -x --audio-format "$AUDIO_FORMAT" --audio-quality 0 \
+            "${FORMAT_ARGS[@]}" \
             --playlist-items "$SELECTION" \
             -o "%(artist,uploader)s - %(title)s.%(ext)s" -P "$FINAL_PATH" "$url" >> "$LOG_FILE" 2>&1
     else
@@ -833,7 +875,7 @@ for album_entry in "${ALBUMS[@]}"; do
             "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
                 --embed-metadata --no-embed-thumbnail --windows-filenames --yes-playlist \
                 --parse-metadata "%(playlist_index)s:%(track_number)s" --write-info-json $SLEEP_ARGS \
-                -f ba -x --audio-format "$AUDIO_FORMAT" --audio-quality 0 \
+                "${FORMAT_ARGS[@]}" \
                 --playlist-items "$NORMAL_SELECTION" \
                 -o "%(artist,uploader)s - %(title)s.%(ext)s" -P "$FINAL_PATH" "$url" >> "$LOG_FILE" 2>&1
         fi
@@ -844,18 +886,18 @@ for album_entry in "${ALBUMS[@]}"; do
                 log "🚚 MV track: $VID"
                 "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
                     --embed-metadata --no-embed-thumbnail --windows-filenames --write-info-json \
-                    -f ba -x --audio-format "$AUDIO_FORMAT" --audio-quality 0 \
+                    "${FORMAT_ARGS[@]}" \
                     -o "temp_mv_%(id)s.%(ext)s" -P "$FINAL_PATH" "$SINGLE_URL" >> "$LOG_FILE" 2>&1
             done <<< "$(echo "$MV_VIDS" | tr ' ' '\n' | grep -v '^$')"
         fi
         if [ -z "$NORMAL_SELECTION" ] && [ -z "$MV_VIDS" ]; then
             log "🚚 Downloading..."
             DOWNLOAD_ARGS=""
-            [ "$SELECTION" != "ALL" ] && DOWNLOAD_ARGS="--playlist-items $SELECTION"
+            [ "$SELECTION" != "ALL" ] && [ -n "$SELECTION" ] && DOWNLOAD_ARGS="--playlist-items $SELECTION"
             "$YTDLP" $NODE_ARGS --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
                 --embed-metadata --no-embed-thumbnail --windows-filenames --yes-playlist \
                 --parse-metadata "%(playlist_index)s:%(track_number)s" --write-info-json $SLEEP_ARGS \
-                -f ba -x --audio-format "$AUDIO_FORMAT" --audio-quality 0 $DOWNLOAD_ARGS \
+                "${FORMAT_ARGS[@]}" $DOWNLOAD_ARGS \
                 -o "%(artist,uploader)s - %(title)s.%(ext)s" -P "$FINAL_PATH" "$url" >> "$LOG_FILE" 2>&1
         fi
     fi
@@ -864,17 +906,17 @@ for album_entry in "${ALBUMS[@]}"; do
     # ── MV single post-processing ──
     if [ "$IS_MV_SINGLE" = true ]; then
         log "🏷️ MV single post-processing..."
-        for mv_f in "$FINAL_PATH"/temp_mv_*.opus; do
+        for mv_f in "$FINAL_PATH"/temp_mv_*.$AUDIO_EXT; do
             [ -f "$mv_f" ] || continue
             SAFE_ARTIST=$(echo "$MV_ARTIST" | sed 's/[\/:*?"<>|]/-/g')
             SAFE_TITLE=$(echo "$MV_TITLE" | sed 's/[\/:*?"<>|]/-/g')
-            NEW_NAME="${SAFE_ARTIST} - ${SAFE_TITLE}.opus"
+            NEW_NAME="${SAFE_ARTIST} - ${SAFE_TITLE}.$AUDIO_EXT"
             NEW_PATH="$FINAL_PATH/$NEW_NAME"
-            [ -f "$NEW_PATH" ] && NEW_PATH="$FINAL_PATH/${SAFE_ARTIST} - ${SAFE_TITLE}_$(date +%s).opus"
+            [ -f "$NEW_PATH" ] && NEW_PATH="$FINAL_PATH/${SAFE_ARTIST} - ${SAFE_TITLE}_$(date +%s).$AUDIO_EXT"
             mv "$mv_f" "$NEW_PATH"
             log "  📝 Renamed: $(basename "$mv_f") → $NEW_NAME"
 
-            CF=""; JSON_FILE="${NEW_PATH%.opus}.info.json"
+            CF=""; JSON_FILE="${NEW_PATH%.$AUDIO_EXT}.info.json"
             [ ! -f "$JSON_FILE" ] && JSON_FILE=$(find "$FINAL_PATH" -name "temp_mv_*.info.json" 2>/dev/null | head -1)
             if [ -f "$JSON_FILE" ]; then
                 if download_cover "$JSON_FILE" CF; then
@@ -896,14 +938,14 @@ for album_entry in "${ALBUMS[@]}"; do
     # ── Strategy 2 post-processing (default mode) ──
     if [ "$MV_STRATEGY" = "2" ]; then
         log "🏷️ Default mode post-processing..."
-        for f in "$FINAL_PATH"/*.opus; do
+        for f in "$FINAL_PATH"/*.$AUDIO_EXT; do
             [ -f "$f" ] || continue
             [[ "$(basename "$f")" == temp_* ]] && continue
             if grep -qxF "$f" /tmp/existing_before_$$.txt 2>/dev/null; then
                 log "  ⏭️ Skipping existing: $(basename "$f")"
                 continue
             fi
-            JSON_FILE="${f%.opus}.info.json"
+            JSON_FILE="${f%.$AUDIO_EXT}.info.json"
             TITLE=""; SA=""; REAL_ALBUM=""; HS=false
             if [ -f "$JSON_FILE" ]; then
                 TITLE=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('title',''))" "$JSON_FILE" 2>/dev/null)
@@ -940,18 +982,18 @@ for album_entry in "${ALBUMS[@]}"; do
     # ── Strategy 1 MV track post-processing (with meta fallback) ──
     if [ -n "$MV_VIDS" ] && [ "$MV_STRATEGY" = "1" ]; then
         log "🏷️ MV track post-processing..."
-        for mv_f in "$FINAL_PATH"/temp_mv_*.opus; do
+        for mv_f in "$FINAL_PATH"/temp_mv_*.$AUDIO_EXT; do
             [ -f "$mv_f" ] || continue
-            JSON_FILE="${mv_f%.opus}.info.json"
+            JSON_FILE="${mv_f%.$AUDIO_EXT}.info.json"
             VID=""
             [ -f "$JSON_FILE" ] && VID=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('id',''))" "$JSON_FILE" 2>/dev/null)
             if [ -n "$VID" ] && [ -n "${MV_DATA[$VID]}" ]; then
                 IFS='|' read -r TITLE ARTIST ALBUM <<< "${MV_DATA[$VID]}"
                 SAFE_ARTIST=$(echo "$ARTIST" | sed 's/[\/:*?"<>|]/-/g')
                 SAFE_TITLE=$(echo "$TITLE" | sed 's/[\/:*?"<>|]/-/g')
-                NEW_NAME="${SAFE_ARTIST} - ${SAFE_TITLE}.opus"
+                NEW_NAME="${SAFE_ARTIST} - ${SAFE_TITLE}.$AUDIO_EXT"
                 NEW_PATH="$FINAL_PATH/$NEW_NAME"
-                [ -f "$NEW_PATH" ] && NEW_PATH="$FINAL_PATH/${SAFE_ARTIST} - ${SAFE_TITLE}_$(date +%s).opus"
+                [ -f "$NEW_PATH" ] && NEW_PATH="$FINAL_PATH/${SAFE_ARTIST} - ${SAFE_TITLE}_$(date +%s).$AUDIO_EXT"
                 mv "$mv_f" "$NEW_PATH"
                 log "  📝 Renamed: $(basename "$mv_f") → $NEW_NAME"
                 CF=""
@@ -985,7 +1027,7 @@ for album_entry in "${ALBUMS[@]}"; do
 
     # ── Normal post-processing ──
     log "🏷️ Post-processing..."
-    for f in "$FINAL_PATH"/*.opus; do
+    for f in "$FINAL_PATH"/*.$AUDIO_EXT; do
         [ -f "$f" ] || continue
         [[ "$(basename "$f")" == temp_* || "$(basename "$f")" == temp_mv_* ]] && continue
         if grep -qxF "$f" /tmp/existing_before_$$.txt 2>/dev/null; then
@@ -994,7 +1036,7 @@ for album_entry in "${ALBUMS[@]}"; do
         fi
         ORIG_ALBUM=""; CF=""; HC="false"
         if [ "$ENHANCED_MODE" = "true" ]; then
-            JSON_FILE="${f%.opus}.info.json"
+            JSON_FILE="${f%.$AUDIO_EXT}.info.json"
             if [ -f "$JSON_FILE" ]; then
                 ORIG_ALBUM=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('album',''))" "$JSON_FILE" 2>/dev/null)
                 SA=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('artist',''))" "$JSON_FILE" 2>/dev/null)
